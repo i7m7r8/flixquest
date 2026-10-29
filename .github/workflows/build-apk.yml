@@ -51,7 +51,7 @@ jobs:
           git -C "$RUNNER_WORKSPACE/flixquest-betterplayer" remote add origin \
             https://github.com/BeamlakAschalew/flixquest-betterplayer.git
           git -C "$RUNNER_WORKSPACE/flixquest-betterplayer" fetch --depth 1 origin \
-            06f36400831b7b9119bd0c043034e1cf39de2d5a
+            9a4753b317c7153dbfc10738a6787fb3e5be8610
           git -C "$RUNNER_WORKSPACE/flixquest-betterplayer" checkout --detach FETCH_HEAD
 
       - name: Prepare .env

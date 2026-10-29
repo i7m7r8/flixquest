@@ -11,8 +11,11 @@ import 'content_ads.dart';
 /// again after each await, because Plus can start while an ad is loading.
 /// Only the Plus controller writes it, from a backend-verified entitlement;
 /// the remote ad switches in AppDependencyProvider stay untouched.
+///
+/// This build is ad-free by design: [adFree] is permanently on, so no ad
+/// request, impression, popup, pre-roll or blocker check can ever run.
 abstract final class AdsPolicy {
-  static final ValueNotifier<bool> _adFree = ValueNotifier<bool>(false);
+  static final ValueNotifier<bool> _adFree = ValueNotifier<bool>(true);
 
   /// Notifies when Plus starts or ends.
   static ValueListenable<bool> get listenable => _adFree;
@@ -25,7 +28,7 @@ abstract final class AdsPolicy {
   static bool adFreeAt(BuildContext context) =>
       adFree || ContentAdScope.adFreeAt(context);
 
-  static void update({required bool adFree}) => _adFree.value = adFree;
+  static void update({required bool adFree}) => _adFree.value = true;
 
   static void addListener(VoidCallback listener) =>
       _adFree.addListener(listener);

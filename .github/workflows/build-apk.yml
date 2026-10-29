@@ -1,0 +1,106 @@
+name: Build ad-free APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.7
+          channel: stable
+          cache: true
+
+      # Matches pubspec.yaml: better_player_plus: path: ../flixquest-betterplayer
+      - name: Clone custom player package
+        run: |
+          git init "$RUNNER_WORKSPACE/flixquest-betterplayer"
+          git -C "$RUNNER_WORKSPACE/flixquest-betterplayer" remote add origin \
+            https://github.com/BeamlakAschalew/flixquest-betterplayer.git
+          git -C "$RUNNER_WORKSPACE/flixquest-betterplayer" fetch --depth 1 origin \
+            06f36400831b7b9119bd0c043034e1cf39de2d5a
+          git -C "$RUNNER_WORKSPACE/flixquest-betterplayer" checkout --detach FETCH_HEAD
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.p12"
+          keytool -importkeystore \
+            -srckeystore "$RUNNER_TEMP/release.p12" -srcstoretype PKCS12 \
+            -srcalias "$KEY_ALIAS" -srcstorepass "$KEYSTORE_PASSWORD" \
+            -destkeystore "$GITHUB_WORKSPACE/android/app/release.jks" -deststoretype JKS \
+            -destalias "$KEY_ALIAS" -deststorepass "$KEYSTORE_PASSWORD" \
+            -destkeypass "$KEYSTORE_PASSWORD" -noprompt
+          printf 'storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" \
+            "$GITHUB_WORKSPACE/android/app/release.jks" > android/key.properties
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release --flavor prod
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-prod-release.apk \
+            "dist/flixquest-adfree-${GITHUB_RUN_NUMBER}.apk"
+
+      - name: Verify signature and alignment
+        run: |
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          APK=$(ls dist/*.apk)
+          "$BT/apksigner" verify --verbose --print-certs "$APK"
+          "$BT/zipalign" -c -v 4 "$APK" | tail -n 1
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: flixquest-adfree-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Attach APK to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
